@@ -1,16 +1,21 @@
 package mapreduce
 
 import (
+	"encoding/json"
+	"fmt"
 	"hash/fnv"
+	"io/ioutil"
+	"os"
 )
 
 // doMap does the job of a map worker: it reads one of the input files
 // (inFile), calls the user-defined map function (mapF) for that file's
 // contents, and partitions the output into nReduce intermediate files.
+// doMap是一个map worker的工作，它读入一个输入文件，然后调用用户自定义的map函数，最后将结果输出到nReduce个文件中
 func doMap(
 	jobName string, // the name of the MapReduce job
 	mapTaskNumber int, // which map task this is
-	inFile string,
+	inFile string, // 处理的输入文件
 	nReduce int, // the number of reduce task that will be run ("R" in the paper)
 	mapF func(file string, contents string) []KeyValue,
 ) {
@@ -41,7 +46,48 @@ func doMap(
 	//
 	// Remember to close the file after you have written all the values!
 
-	// 使用map处理称nreduce文件
+	// 1.读取输入文件的所有内容
+	// 2.调用map函数处理成kv
+	// 3.对kv进行分类
+	// 4.将分好类的kv写入到对应分区的文件中
+
+	// 1.读取输入文件的所有内容
+	contents, err := ioutil.ReadFile(inFile)
+	if err != nil {
+		fmt.Printf("failed to open %s: %v", inFile, err)
+		return
+	}
+
+	// 2.调用map函数处理成kv
+	kvs := mapF(inFile, string(contents))
+
+	// 3.将所有的kv进行分类
+	datas := make([][]KeyValue, nReduce)
+	for _, kv := range kvs {
+		index := ihash(kv.Key) % uint32(nReduce)
+		datas[index] = append(datas[index], kv)
+	}
+
+	// 4.将数据写入对应的分区文件中
+	for nr, data := range datas {
+		outFileName := reduceName(jobName, mapTaskNumber, nr)
+		outFile, err := os.Create(outFileName)
+		if err != nil {
+			fmt.Printf("failed to create %s", outFileName)
+			return
+		}
+
+		enc := json.NewEncoder(outFile)
+		for _, kv := range data {
+			err := enc.Encode(&kv)
+			if err != nil {
+				fmt.Printf("failed to encode:%v\n", err)
+				outFile.Close()
+				return
+			}
+		}
+		outFile.Close()
+	}
 }
 
 func ihash(s string) uint32 {

@@ -23,11 +23,12 @@ const (
 // Check if we have N numbers in output file
 
 // Split in words
+// 分割单词，读取每个单词构建成<key，value>
 func MapFunc(file string, value string) (res []KeyValue) {
 	debug("Map %v\n", value)
 	words := strings.Fields(value)
 	for _, w := range words {
-		kv := KeyValue{w, ""}
+		kv := KeyValue{w, "1"}
 		res = append(res, kv)
 	}
 	return
@@ -38,7 +39,19 @@ func ReduceFunc(key string, values []string) string {
 	for _, e := range values {
 		debug("Reduce %s %v\n", key, e)
 	}
-	return ""
+
+	var total int64
+	for _, value := range values {
+		num, err := strconv.ParseInt(value, 10, 32)
+		if err != nil {
+			fmt.Printf("failed to conv %s:%v", value, err)
+			break
+		}
+		total += num
+	}
+
+	return strconv.FormatInt(total, 10)
+	// return ""
 }
 
 // Checks input file agaist output file: each input number should show up
@@ -96,20 +109,27 @@ func checkWorker(t *testing.T, l []int) {
 }
 
 // Make input file
+// 新建文件，写入数据，返回文件名列表
 func makeInputs(num int) []string {
 	var names []string
 	var i = 0
 	for f := 0; f < num; f++ {
-		names = append(names, fmt.Sprintf("824-mrinput-%d.txt", f))
+		names = append(names, fmt.Sprintf("824-mrinput-%d.txt", f)) // 文件名：824-mrinput-0.txt
+
+		// 创建文件
 		file, err := os.Create(names[f])
 		if err != nil {
 			log.Fatal("mkInput: ", err)
 		}
+
+		// 所有文件总共写入nNumber个数字
 		w := bufio.NewWriter(file)
 		for i < (f+1)*(nNumber/num) {
 			fmt.Fprintf(w, "%d\n", i)
 			i++
 		}
+
+		// 刷入磁盘，关闭文件
 		w.Flush()
 		file.Close()
 	}
@@ -130,8 +150,8 @@ func port(suffix string) string {
 }
 
 func setup() *Master {
-	files := makeInputs(nMap)
-	master := port("master")
+	files := makeInputs(nMap) // 生成输入文件
+	master := port("master")  // 创建临时文件，用于unix socket通讯
 	mr := Distributed("test", files, nReduce, master)
 	return mr
 }
@@ -144,8 +164,9 @@ func cleanup(mr *Master) {
 }
 
 func TestSequentialSingle(t *testing.T) {
+	// MapFunc为map函数，ReduceFunc为reduce函数
 	mr := Sequential("test", makeInputs(1), 1, MapFunc, ReduceFunc)
-	mr.Wait()
+	mr.Wait() // 等待完成
 	check(t, mr.files)
 	checkWorker(t, mr.stats)
 	cleanup(mr)
@@ -160,11 +181,16 @@ func TestSequentialMany(t *testing.T) {
 }
 
 func TestBasic(t *testing.T) {
+	// 启动master
 	mr := setup()
+
+	// 启动worker
 	for i := 0; i < 2; i++ {
 		go RunWorker(mr.address, port("worker"+strconv.Itoa(i)),
 			MapFunc, ReduceFunc, -1)
 	}
+
+	// 等待处理完成
 	mr.Wait()
 	check(t, mr.files)
 	checkWorker(t, mr.stats)

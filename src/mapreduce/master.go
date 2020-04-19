@@ -37,6 +37,7 @@ func (mr *Master) Register(args *RegisterArgs, _ *struct{}) error {
 	go func() {
 		mr.registerChannel <- args.Worker
 	}()
+
 	return nil
 }
 
@@ -50,6 +51,7 @@ func newMaster(master string) (mr *Master) {
 	return
 }
 
+// 序列化执行，所有的任务都变为串行
 // Sequential runs map and reduce tasks sequentially, waiting for each task to
 // complete before scheduling the next.
 func Sequential(jobName string, files []string, nreduce int,
@@ -77,11 +79,11 @@ func Sequential(jobName string, files []string, nreduce int,
 // Distributed schedules map and reduce tasks on workers that register with the
 // master over RPC.
 func Distributed(jobName string, files []string, nreduce int, master string) (mr *Master) {
-	mr = newMaster(master)
-	mr.startRPCServer()
+	mr = newMaster(master) // 创建master
+	mr.startRPCServer()    // 启动rpc服务器
 	go mr.run(jobName, files, nreduce, mr.schedule, func() {
-		mr.stats = mr.killWorkers()
-		mr.stopRPCServer()
+		mr.stats = mr.killWorkers() // 通过RPC关闭所有的worker
+		mr.stopRPCServer()          // 关闭rpc服务器
 	})
 	return
 }

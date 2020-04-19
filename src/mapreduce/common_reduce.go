@@ -1,5 +1,11 @@
 package mapreduce
 
+import (
+	"encoding/json"
+	"fmt"
+	"os"
+)
+
 // doReduce does the job of a reduce worker: it reads the intermediate
 // key/value pairs (produced by the map phase) for this task, sorts the
 // intermediate key/value pairs by key, calls the user-defined reduce function
@@ -32,6 +38,51 @@ func doReduce(
 	// }
 	// file.Close()
 
-	// 合并所有相同的key，然后调用reduce
-	// reduceName 可以找到reduce文件
+	// Reduce的过程如下：
+	//  S1: 获取到Map产生的文件并打开(reduceName获取文件名)
+	// 　S2：获取中间文件的数据(对多个map产生的文件更加值合并)
+	// 　S3：打开文件（mergeName获取文件名），将用于存储Reduce任务的结果
+	// 　S4：合并结果之后(S2)，进行reduceF操作, work count的操作将结果累加，也就是word出现在这个文件中出现的次数
+
+	datas := make(map[string][]string)
+	for i := 0; i < nMap; i++ {
+		inFileName := reduceName(jobName, i, reduceTaskNumber)
+		inFile, err := os.Open(inFileName)
+		if err != nil {
+			fmt.Printf("failed to open %s:%v", inFileName, err)
+			return
+		}
+
+		var kv KeyValue
+		dec := json.NewDecoder(inFile)
+		for dec.Decode(&kv) == nil {
+			data, ok := datas[kv.Key]
+			if !ok {
+				data = []string{}
+			}
+
+			data = append(data, kv.Value)
+			datas[kv.Key] = data
+		}
+
+		inFile.Close()
+	}
+
+	outFileName := mergeName(jobName, reduceTaskNumber)
+	outFile, err := os.Create(outFileName)
+	if err != nil {
+		fmt.Printf("failed to create %s:%v", outFileName, err)
+		return
+	}
+	defer outFile.Close()
+
+	enc := json.NewEncoder(outFile)
+	for key, values := range datas {
+		res := reduceF(key, values)
+		err := enc.Encode(KeyValue{Key: key, Value: res})
+		if err != nil {
+			fmt.Printf("failed to encdoe:%v\n", err)
+			return
+		}
+	}
 }
